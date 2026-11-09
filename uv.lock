@@ -236,6 +236,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "scipy" },
 ]
 
 [package.metadata]
@@ -245,7 +246,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "plotly", specifier = ">=5.20" },
-    { name = "pulp", specifier = ">=2.8" },
+    { name = "pulp", specifier = ">=4.2" },
     { name = "pyarrow", specifier = ">=15" },
     { name = "requests", specifier = ">=2.31" },
     { name = "scikit-learn", specifier = ">=1.4" },
@@ -259,6 +260,7 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "scipy", specifier = ">=1.18.1" },
 ]
 
 [[package]]
