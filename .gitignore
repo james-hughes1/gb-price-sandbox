@@ -16,7 +16,7 @@ dist/
 htmlcov/
 
 # Data cache (raw pulls are re-fetchable; never commit them)
-data/
+/data/
 
 # Editors / OS
 .vscode/
