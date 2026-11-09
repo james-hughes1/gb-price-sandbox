@@ -20,7 +20,8 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.12 is fetched automatically 
 uv sync                                  # create .venv and install deps
 uv run pre-commit install                # enable git hooks
 uv run streamlit run app/Home.py         # launch the app
-uv run pytest                            # tests
+uv run pytest                            # tests (offline)
+uv run pytest -m network                 # live API smoke tests
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -51,7 +52,11 @@ tests/
 ## Data sources
 
 - **Elexon Insights API:** Market Index Price (half-hourly, day-ahead proxy) and system price.
-- **NESO data portal:** day-ahead demand and wind forecasts.
+- **Elexon Insights API (NESO forecasts):** national demand forecast (NDF, half-hourly) and wind
+  generation forecast (WINDFOR, hourly), with every published vintage time-stamped, so features
+  are built only from forecasts available at the D-1 issue time. Coverage starts in 2022, which sets
+  the study period. (The NESO portal's "historic" files are unsuitable: they keep one revision per
+  period, often published after delivery.)
 - **Open-Meteo** historical forecasts, **PV_Live** (Sheffield Solar), a gas price series, a GB
   calendar.
 

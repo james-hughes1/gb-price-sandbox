@@ -18,13 +18,11 @@ class Settings:
         data_dir: Root directory for the local parquet cache.
         http_timeout: Timeout in seconds for API requests.
         elexon_base_url: Base URL of the Elexon Insights API.
-        neso_base_url: Base URL of the NESO data portal (CKAN) API.
     """
 
     data_dir: Path = Path("data")
     http_timeout: float = 30.0
     elexon_base_url: str = "https://data.elexon.co.uk/bmrs/api/v1"
-    neso_base_url: str = "https://api.neso.energy/api/3/action"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
@@ -42,7 +40,6 @@ class Settings:
             data_dir=Path(env.get("GBPS_DATA_DIR", defaults.data_dir)),
             http_timeout=float(env.get("GBPS_HTTP_TIMEOUT", defaults.http_timeout)),
             elexon_base_url=env.get("GBPS_ELEXON_BASE_URL", defaults.elexon_base_url),
-            neso_base_url=env.get("GBPS_NESO_BASE_URL", defaults.neso_base_url),
         )
 
 

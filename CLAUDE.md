@@ -15,7 +15,8 @@ The tabs should ideally be visually intuitive, interactive where this enriches t
 
 ## Data
 - Elexon Insights API: Market Index Price (MID, half-hourly) as the day-ahead price proxy, plus system price.
-- NESO data portal: day-ahead demand and wind **forecasts** (not actuals).
+- Elexon Insights API: NESO's demand (NDF, half-hourly) and wind (WINDFOR, hourly) **forecasts** (not actuals), with every published vintage time-stamped. Not the NESO portal's "historic" files: they keep only the final revision, often published after delivery.
+- **Study period starts 2022-01-01** (earliest NDF vintage history on Elexon).
 - Open-Meteo (historical forecasts), PV_Live, a gas price series, a GB calendar.
 - Cache raw pulls locally (parquet); loaders must be idempotent.
 
