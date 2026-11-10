@@ -41,7 +41,9 @@ def cached_parquet(
     tmp = path.with_suffix(path.suffix + ".tmp")
     df.to_parquet(tmp)
     tmp.replace(path)
-    return df
+    # Return what a later cache hit will return (parquet can change e.g. timestamp units), so
+    # the first call and every subsequent one agree exactly.
+    return pd.read_parquet(path)
 
 
 def month_starts(start: pd.Timestamp, end: pd.Timestamp) -> list[pd.Timestamp]:

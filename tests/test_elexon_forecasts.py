@@ -148,7 +148,7 @@ def test_point_in_time_features_cover_full_delivery_day(settings, loader, handle
     assert vintages["issued_at"].min() < periods[0]
 
     features = select_vintage(vintages)
-    assert features.index.equals(periods.rename("target_time"))  # every half-hour covered
+    assert features.index.as_unit("ns").equals(periods.as_unit("ns"))  # every half-hour covered
     assert_available_at_issue(features)
     assert (features["issued_at"] <= issue_time(day)).all()
 
