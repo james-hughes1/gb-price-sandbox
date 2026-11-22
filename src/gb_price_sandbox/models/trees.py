@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -12,33 +10,16 @@ from quantile_forest import RandomForestQuantileRegressor
 from gb_price_sandbox.features.dataset import FEATURE_COLUMNS
 from gb_price_sandbox.models.base import QUANTILE_COLUMNS, QUANTILES, sort_quantiles
 
-
-@dataclass(frozen=True)
-class LightGBMPreset:
-    """A fixed LightGBM configuration (no tuning: the presets are the choice)."""
-
-    n_estimators: int
-    num_leaves: int
-    learning_rate: float
-    min_child_samples: int
-    subsample: float = 1.0
-    colsample_bytree: float = 1.0
-
-
-LIGHTGBM_PRESETS: dict[str, LightGBMPreset] = {
-    # Few, shallow trees: quick to refit, hard to overfit.
-    "light": LightGBMPreset(
-        n_estimators=200, num_leaves=15, learning_rate=0.05, min_child_samples=50
-    ),
-    # More and deeper trees, with row and column subsampling to keep it from memorising.
-    "heavy": LightGBMPreset(
-        n_estimators=500,
-        num_leaves=31,
-        learning_rate=0.05,
-        min_child_samples=20,
-        subsample=0.8,
-        colsample_bytree=0.8,
-    ),
+#: Fixed LightGBM settings, kept deliberately small so a 4-year walk-forward stays quick:
+#: 100 shallow trees with a high learning rate, each fitted on half the rows.
+LIGHTGBM_PARAMS: dict[str, float | int] = {
+    "n_estimators": 100,
+    "num_leaves": 15,
+    "learning_rate": 0.1,
+    "min_child_samples": 100,
+    "subsample": 0.5,
+    "subsample_freq": 1,
+    "max_bin": 63,
 }
 
 
@@ -51,13 +32,14 @@ class LightGBMQuantile:
     half-hours, with the half-hour and day of week as inputs, so trees can find interactions
     such as "wind matters more overnight" by themselves. It sees every column in
     :data:`FEATURE_COLUMNS`, including residual demand. Missing inputs are handled natively.
+    Settings are fixed (:data:`LIGHTGBM_PARAMS`) and small, for speed.
     """
 
-    def __init__(self, preset: str = "light") -> None:
-        """Pick a configuration from :data:`LIGHTGBM_PRESETS`."""
-        self.preset = preset
-        self.params = asdict(LIGHTGBM_PRESETS[preset])
-        self.name = f"LightGBM ({preset})"
+    name = "LightGBM"
+
+    def __init__(self) -> None:
+        """Fixed settings (see :data:`LIGHTGBM_PARAMS`)."""
+        self.params = dict(LIGHTGBM_PARAMS)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> LightGBMQuantile:  # noqa: N803
         """Fit one booster per quantile."""
@@ -67,7 +49,6 @@ class LightGBMQuantile:
             lgb.LGBMRegressor(
                 objective="quantile",
                 alpha=q,
-                subsample_freq=1 if self.params["subsample"] < 1 else 0,
                 random_state=0,
                 verbose=-1,
                 **self.params,
@@ -92,7 +73,8 @@ class QuantileForest:
     the 10th, 50th and 90th percentiles off that pool. One forest gives every quantile, and
     the bands come from the spread of similar past situations rather than an assumed shape.
 
-    Settings are fixed: 100 trees, at least 50 rows per leaf, each tree on a 30% sample.
+    Settings are fixed and small, for speed: 50 trees, at least 50 rows per leaf, each tree
+    on a 20% sample.
     Rows with a missing input are dropped from training and get no forecast.
     """
 
@@ -100,7 +82,7 @@ class QuantileForest:
 
     def __init__(self) -> None:
         """Fixed settings (see the class docstring)."""
-        self.params = {"n_estimators": 100, "min_samples_leaf": 50, "max_samples": 0.3}
+        self.params = {"n_estimators": 50, "min_samples_leaf": 50, "max_samples": 0.2}
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> QuantileForest:  # noqa: N803
         """Grow the forest on complete rows."""

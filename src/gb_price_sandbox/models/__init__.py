@@ -32,6 +32,10 @@ class ModelSpec:
         factory: Zero-argument callable returning an unfitted model.
         probabilistic: True if it forecasts a band (q10 to q90), not just a point.
         summary: One line for selectors and tables.
+        retrain_every_days: Walk-forward refit interval. Weekly by default; the slowest
+            models refit every 4 weeks so a full backtest takes minutes, not hours.
+        max_train_days: Trailing training window in days (None: all history). Used by the
+            slowest models, again for speed.
     """
 
     name: str
@@ -39,14 +43,12 @@ class ModelSpec:
     factory: Callable[[], Forecaster | HistoryForecaster]
     probabilistic: bool
     summary: str
+    retrain_every_days: int = 7
+    max_train_days: int | None = None
 
 
-def _lightgbm(preset: str) -> Callable[[], LightGBMQuantile]:
-    def make() -> LightGBMQuantile:
-        return LightGBMQuantile(preset)
-
-    make.__name__ = f"lightgbm_{preset}"
-    return make
+#: Refit interval for the slowest models.
+SLOW_REFIT_DAYS = 28
 
 
 #: Every model, in display order. Families are contiguous.
@@ -63,13 +65,23 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "Average of the last four same weekdays",
     ),
     ModelSpec(LEAR.name, "LEAR", LEAR, False, "LASSO on lagged prices, demand and wind"),
-    ModelSpec(MSTLAR.name, "MSTL", MSTLAR, True, "Daily and weekly seasonality plus AR(2)"),
+    # The two time-series models update on the latest prices every day without refitting,
+    # so their parameters only need re-estimating every 4 weeks.
+    ModelSpec(
+        MSTLAR.name,
+        "MSTL",
+        MSTLAR,
+        True,
+        "Daily and weekly seasonality plus AR(2)",
+        SLOW_REFIT_DAYS,
+    ),
     ModelSpec(
         SARIMAXFourier.name,
         "SARIMAX",
         SARIMAXFourier,
         True,
         "ARIMA errors, Fourier seasonality, demand and wind",
+        SLOW_REFIT_DAYS,
     ),
     ModelSpec(
         LinearQuantileRegression.name,
@@ -77,16 +89,35 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         LinearQuantileRegression,
         True,
         "LEAR's inputs, fitted for each quantile",
+        # 144 separate fits per refit (48 half-hours x 3 quantiles), so it refits quarterly.
+        91,
+        max_train_days=365,
     ),
-    ModelSpec(QRA.name, "QRA", QRA, True, "Quantile regression on the point models' forecasts"),
-    ModelSpec("LightGBM (light)", "LightGBM", _lightgbm("light"), True, "200 shallow trees"),
-    ModelSpec("LightGBM (heavy)", "LightGBM", _lightgbm("heavy"), True, "500 deeper trees"),
+    ModelSpec(
+        QRA.name,
+        "QRA",
+        QRA,
+        True,
+        "Quantile regression on the point models' forecasts",
+        SLOW_REFIT_DAYS,
+        max_train_days=730,
+    ),
+    ModelSpec(
+        LightGBMQuantile.name,
+        "LightGBM",
+        LightGBMQuantile,
+        True,
+        "Gradient-boosted trees, 100 small trees per quantile",
+        SLOW_REFIT_DAYS,
+    ),
     ModelSpec(
         QuantileForest.name,
         "Quantile forest",
         QuantileForest,
         True,
         "Random forest reading quantiles off its leaves",
+        SLOW_REFIT_DAYS,
+        max_train_days=730,
     ),
 )
 

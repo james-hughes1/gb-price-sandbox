@@ -72,11 +72,41 @@ def test_colours_follow_family_and_dashes_separate_siblings():
         assert len({dashes[n] for n in names}) == len(names)
 
 
-def test_fingerprint_separates_presets_and_is_stable():
-    light, heavy = MODELS["LightGBM (light)"], MODELS["LightGBM (heavy)"]
-    assert model_fingerprint(light) != model_fingerprint(heavy)
-    assert model_fingerprint(light) == model_fingerprint(light)
+def test_fingerprint_tracks_settings_and_is_stable():
+    from gb_price_sandbox.models import LightGBMQuantile
+
+    def tweaked():
+        model = LightGBMQuantile()
+        model.params["n_estimators"] = 101
+        return model
+
+    assert model_fingerprint(LightGBMQuantile) != model_fingerprint(tweaked)
+    assert model_fingerprint(LightGBMQuantile) == model_fingerprint(LightGBMQuantile)
     assert model_fingerprint(MODELS["LEAR"]) == model_fingerprint(MODELS["LEAR"])
+
+
+def test_refit_interval_is_part_of_the_cache_key(tmp_path, data):
+    from gb_price_sandbox.backtest import backtest_cache_path
+    from gb_price_sandbox.config import Settings
+
+    args = (data, "LEAR", MODELS["LEAR"], TEST_START, TEST_END, Settings(data_dir=tmp_path))
+    weekly = backtest_cache_path(*args, retrain_every_days=7)
+    monthly = backtest_cache_path(*args, retrain_every_days=28)
+    assert weekly != monthly
+
+
+def test_slow_models_refit_less_often():
+
+    expected = {
+        "Linear quantile regression": 91,
+        "QRA": 28,
+        "LightGBM": 28,
+        "Quantile regression forest": 28,
+        "MSTL + AR": 28,
+        "SARIMAX": 28,
+    }
+    for spec in MODEL_SPECS:
+        assert spec.retrain_every_days == expected.get(spec.name, 7), spec.name
 
 
 # --- naive baselines -------------------------------------------------------------------------
@@ -133,7 +163,7 @@ def test_probabilistic_models_give_real_bands(data, name):
 def test_learning_models_beat_seasonal_naive(data):
     naive = backtest(data, "Seasonal naive")
     base = (naive["q50"] - naive["y"]).abs().mean()
-    for name in ("LEAR", "Linear quantile regression", "QRA", "LightGBM (light)"):
+    for name in ("LEAR", "Linear quantile regression", "QRA", "LightGBM"):
         out = backtest(data, name)
         assert (out["q50"] - out["y"]).abs().mean() < base, name
 

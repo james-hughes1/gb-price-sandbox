@@ -24,7 +24,13 @@ from gb_price_sandbox.data.open_meteo import load_weather
 from gb_price_sandbox.data.pv_live import load_solar_outturn
 from gb_price_sandbox.features import explore
 from gb_price_sandbox.features.dataset import STUDY_START, build_dataset, london_midnight
-from gb_price_sandbox.models import DEFAULT_MODELS, FAMILIES, MODEL_SPECS, MODELS
+from gb_price_sandbox.models import (
+    DEFAULT_MODELS,
+    FAMILIES,
+    MODEL_SPECS,
+    MODEL_SPECS_BY_NAME,
+    MODELS,
+)
 from gb_price_sandbox.optimise import PERFECT_FORESIGHT, BatterySpec, battery_backtest
 from gb_price_sandbox.timing import LONDON
 from gb_price_sandbox.viz.theme import ACTUAL, entity_colors
@@ -91,7 +97,16 @@ def cached_model_names(test_start: dt.date, test_end: dt.date) -> list[str]:
     return [
         name
         for name, factory in MODELS.items()
-        if backtest_cache_path(data, name, factory, test_start, test_end, settings).exists()
+        if backtest_cache_path(
+            data,
+            name,
+            factory,
+            test_start,
+            test_end,
+            settings,
+            retrain_every_days=MODEL_SPECS_BY_NAME[name].retrain_every_days,
+            max_train_days=MODEL_SPECS_BY_NAME[name].max_train_days,
+        ).exists()
     ]
 
 
@@ -109,7 +124,16 @@ def run_backtests(
     names = model_names or list(MODELS)
     settings = get_settings()
     return {
-        name: cached_walk_forward(data, name, MODELS[name], test_start, test_end, settings)
+        name: cached_walk_forward(
+            data,
+            name,
+            MODELS[name],
+            test_start,
+            test_end,
+            settings,
+            retrain_every_days=MODEL_SPECS_BY_NAME[name].retrain_every_days,
+            max_train_days=MODEL_SPECS_BY_NAME[name].max_train_days,
+        )
         for name in names
     }
 

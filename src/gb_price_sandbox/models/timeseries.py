@@ -22,16 +22,16 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from gb_price_sandbox.models.base import QUANTILE_COLUMNS
 from gb_price_sandbox.timing import LONDON, PERIOD
 
-#: Trailing window (days) each refit and each daily update uses.
+#: Trailing window (days) each refit and each daily update uses, unless a model overrides it.
 WINDOW_DAYS = 28
 #: Two-sided level of the prediction interval that gives q10 and q90.
 _ALPHA = 0.2
 
 
-def _regular(series: pd.Series, end: pd.Timestamp | None = None) -> pd.Series:
-    """The last :data:`WINDOW_DAYS` of ``series`` on a complete half-hourly grid."""
-    end = series.index.max() if end is None else end
-    start = end - pd.Timedelta(days=WINDOW_DAYS) + PERIOD
+def _regular(series: pd.Series, days: int = WINDOW_DAYS) -> pd.Series:
+    """The last ``days`` days of ``series`` on a complete half-hourly grid."""
+    end = series.index.max()
+    start = end - pd.Timedelta(days=days) + PERIOD
     grid = pd.date_range(start, end, freq=PERIOD)
     return series.reindex(grid)
 
@@ -117,7 +117,7 @@ class SARIMAXFourier:
     data, so the seasons go into the regression instead, as **Fourier terms**: sine and cosine
     waves at 1, 2 and 3 cycles per day and 1 and 2 cycles per week (local clock time, so clock
     changes are handled). NESO's demand and wind forecasts are added as further regressors.
-    The errors follow an ARMA(2, 1), which captures how today's surprise carries into
+    The errors follow an ARMA(1, 1), which captures how today's surprise carries into
     tomorrow. The result is the SARIMAX model class with all the seasonality in the X.
     """
 
@@ -125,8 +125,12 @@ class SARIMAXFourier:
     uses_history = True
 
     def __init__(self) -> None:
-        """Fixed settings: 28-day window, ARMA(2, 1) errors, 3 daily and 2 weekly harmonics."""
-        self.order = (2, 0, 1)
+        """Fixed settings: 14-day window, ARMA(1, 1) errors, 3 daily and 2 weekly harmonics.
+
+        Kept small because estimating the parameters dominates its run time.
+        """
+        self.window_days = 14
+        self.order = (1, 0, 1)
         self.daily_harmonics = 3
         self.weekly_harmonics = 2
 
@@ -147,8 +151,8 @@ class SARIMAXFourier:
         return np.column_stack([np.ones(len(frame)), *cols, scaled])
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> SARIMAXFourier:  # noqa: N803
-        """Fit on the last 28 days (missing prices are skipped by the Kalman filter)."""
-        window = _regular(y)
+        """Fit on the last 14 days (missing prices are skipped by the Kalman filter)."""
+        window = _regular(y, self.window_days)
         features = X[list(EXOG_COLUMNS)].reindex(window.index)
         self.median_, self.mad_ = _robust_scale(window)
         self.exog_mean_ = features.mean()
@@ -162,8 +166,8 @@ class SARIMAXFourier:
         return self
 
     def predict_day(self, history: pd.DataFrame, future: pd.DataFrame) -> pd.DataFrame:
-        """Re-run the filter on the latest 28 days (same parameters) and forecast."""
-        window = _regular(history["price"])
+        """Re-run the filter on the latest 14 days (same parameters) and forecast."""
+        window = _regular(history["price"], self.window_days)
         hist = history.reindex(window.index)
         z = np.arcsinh((window - self.median_) / self.mad_).to_numpy()
         if np.isnan(z).all():

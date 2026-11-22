@@ -20,14 +20,20 @@ from gb_price_sandbox.timing import MID_PUBLICATION_MARGIN, PERIOD, issue_time
 HISTORY_DAYS = 35
 
 
-def training_mask(data: pd.DataFrame, first_forecast_day: dt.date) -> pd.Series:
+def training_mask(
+    data: pd.DataFrame, first_forecast_day: dt.date, max_train_days: int | None = None
+) -> pd.Series:
     """Rows usable for a model issued at the cutoff of ``first_forecast_day`` (D-1 morning).
 
     Only delivery days up to D-2 have fully settled prices by then, so those are the
-    training targets. Rows with a missing target are dropped.
+    training targets. Rows with a missing target are dropped. ``max_train_days`` turns the
+    expanding window into a trailing one of that many days.
     """
     last_train_day = first_forecast_day - dt.timedelta(days=2)
-    return (data["delivery_day"] <= last_train_day) & data[TARGET].notna()
+    mask = (data["delivery_day"] <= last_train_day) & data[TARGET].notna()
+    if max_train_days is not None:
+        mask &= data["delivery_day"] > last_train_day - dt.timedelta(days=max_train_days)
+    return mask
 
 
 def published_cutoff(day: dt.date, hour: int = 10) -> pd.Timestamp:
@@ -70,6 +76,7 @@ def walk_forward(
     test_end: dt.date,
     *,
     retrain_every_days: int = 7,
+    max_train_days: int | None = None,
     hour: int = 10,
 ) -> pd.DataFrame:
     """Backtest a model over delivery days ``[test_start, test_end)``.
@@ -86,6 +93,7 @@ def walk_forward(
         test_start: First delivery day forecast (inclusive).
         test_end: Last delivery day forecast (exclusive).
         retrain_every_days: Retrain cadence in days.
+        max_train_days: Train on only the last this-many days (default: all history).
         hour: Forecast issue hour, London time on D-1, used for the leakage assertion.
 
     Returns:
@@ -102,7 +110,7 @@ def walk_forward(
     outputs = []
     for block in blocks:
         first = block[0]
-        train = data[training_mask(data, first)]
+        train = data[training_mask(data, first, max_train_days)]
         if train.empty:
             raise ValueError(f"no training data before {first}")
         # Leakage guard: every training target period has ended by the issue time.
@@ -162,6 +170,8 @@ def backtest_cache_path(
     settings: Settings,
     *,
     hour: int = 10,
+    retrain_every_days: int = 7,
+    max_train_days: int | None = None,
 ):
     """Where :func:`cached_walk_forward` stores (or would store) this backtest."""
     slug = "".join(c if c.isalnum() else "_" for c in name.lower())
@@ -169,7 +179,7 @@ def backtest_cache_path(
     data_hash = hashlib.sha1(pd.util.hash_pandas_object(visible).to_numpy().tobytes()).hexdigest()
     key = (
         f"{slug}_{model_fingerprint(make_model)}_{test_start}_{test_end}_h{hour:02d}"
-        f"_data{data_hash[:10]}"
+        f"_r{retrain_every_days}_w{max_train_days or 'all'}_data{data_hash[:10]}"
     )
     return settings.data_dir / "processed" / "backtests" / f"{key}.parquet"
 
@@ -183,6 +193,8 @@ def cached_walk_forward(
     settings: Settings,
     *,
     hour: int = 10,
+    retrain_every_days: int = 7,
+    max_train_days: int | None = None,
     refresh: bool = False,
 ) -> pd.DataFrame:
     """:func:`walk_forward`, cached as parquet under ``data/processed/backtests``.
@@ -191,10 +203,28 @@ def cached_walk_forward(
     issue hour and a hash of the data rows the backtest can see (everything before
     ``test_end``), so any of those changing triggers a re-run. Appending newer data does not.
     """
-    path = backtest_cache_path(data, name, make_model, test_start, test_end, settings, hour=hour)
+    path = backtest_cache_path(
+        data,
+        name,
+        make_model,
+        test_start,
+        test_end,
+        settings,
+        hour=hour,
+        retrain_every_days=retrain_every_days,
+        max_train_days=max_train_days,
+    )
     out = cached_parquet(
         path,
-        lambda: walk_forward(data, make_model, test_start, test_end, hour=hour),
+        lambda: walk_forward(
+            data,
+            make_model,
+            test_start,
+            test_end,
+            hour=hour,
+            retrain_every_days=retrain_every_days,
+            max_train_days=max_train_days,
+        ),
         refresh=refresh,
     )
     out["delivery_day"] = pd.to_datetime(out["delivery_day"]).dt.date

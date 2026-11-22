@@ -94,6 +94,13 @@ def test_lear_handles_negative_prices_and_missing_inputs():
 # --- walk-forward ----------------------------------------------------------------------------
 
 
+def test_training_mask_trailing_window():
+    data = synthetic_dataset()
+    mask = training_mask(data, dt.date(2024, 3, 1), max_train_days=10)
+    days = data.loc[mask, "delivery_day"]
+    assert days.min() == dt.date(2024, 2, 19) and days.max() == dt.date(2024, 2, 28)
+
+
 def test_training_mask_stops_two_days_before():
     data = synthetic_dataset()
     mask = training_mask(data, dt.date(2024, 2, 10))
@@ -123,7 +130,7 @@ def test_walk_forward_detects_leaky_training_window(monkeypatch):
     wf = importlib.import_module("gb_price_sandbox.backtest.walk_forward")
 
     data = synthetic_dataset()
-    monkeypatch.setattr(wf, "training_mask", lambda d, day: d["delivery_day"] < day)
+    monkeypatch.setattr(wf, "training_mask", lambda d, day, *_: d["delivery_day"] < day)
     with pytest.raises(AssertionError, match="issue time"):
         wf.walk_forward(data, Spy, dt.date(2024, 2, 1), dt.date(2024, 2, 8))
 
