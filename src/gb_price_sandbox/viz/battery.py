@@ -49,6 +49,7 @@ def fig_dispatch_day(
     colors: dict[str, str],
     day: dt.date,
     dark: bool,
+    dashes: dict[str, str] | None = None,
 ) -> go.Figure:
     """One day: prices (top) and state of charge (bottom), stacked panels sharing the time axis.
 
@@ -59,6 +60,7 @@ def fig_dispatch_day(
         colors: Fixed colour per name (including ``"Actual"``).
         day: Delivery day to show.
         dark: Dark mode.
+        dashes: Optional line dash per name, for models sharing a family colour.
     """
     first = next(iter(schedules.values()))
     local = first.index.tz_convert(LONDON)
@@ -93,7 +95,12 @@ def fig_dispatch_day(
                     y=forecasts[name][mask],
                     name=name,
                     mode="lines",
-                    line={"width": 2, "color": colors[name], "shape": "hv"},
+                    line={
+                        "width": 2,
+                        "color": colors[name],
+                        "shape": "hv",
+                        "dash": (dashes or {}).get(name, "solid"),
+                    },
                     legendgroup=name,
                     opacity=0.7,
                     hovertemplate=f"{name} forecast £%{{y:.0f}}<extra></extra>",
@@ -108,7 +115,7 @@ def fig_dispatch_day(
                 y=sched.loc[mask, "soc_mwh"],
                 name=name,
                 mode="lines",
-                line={"width": 2, "color": colors[name]},
+                line={"width": 2, "color": colors[name], "dash": (dashes or {}).get(name, "solid")},
                 legendgroup=name,
                 showlegend=name not in forecasts,
                 hovertemplate=f"{name} SoC %{{y:.2f}} MWh<extra></extra>",

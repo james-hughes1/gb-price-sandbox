@@ -14,6 +14,9 @@ import pandas as pd
 LONDON = "Europe/London"
 PERIOD = pd.Timedelta(minutes=30)
 PERIOD_HOURS = 0.5
+#: Allowance for Elexon to publish a half-hour's Market Index Price after it ends. Prices for
+#: periods ending later than ``issue time - MID_PUBLICATION_MARGIN`` are treated as unknown.
+MID_PUBLICATION_MARGIN = pd.Timedelta(hours=1)
 
 
 def ensure_utc_index(index: pd.Index) -> pd.DatetimeIndex:

@@ -12,14 +12,19 @@ from dataclasses import dataclass
 import pandas as pd
 import requests
 
-from gb_price_sandbox.backtest import cached_walk_forward, error_by_period_of_day, leaderboard
+from gb_price_sandbox.backtest import (
+    backtest_cache_path,
+    cached_walk_forward,
+    error_by_period_of_day,
+    leaderboard,
+)
 from gb_price_sandbox.config import get_settings
 from gb_price_sandbox.data.calendar import bank_holiday_dates, load_bank_holidays
 from gb_price_sandbox.data.open_meteo import load_weather
 from gb_price_sandbox.data.pv_live import load_solar_outturn
 from gb_price_sandbox.features import explore
 from gb_price_sandbox.features.dataset import STUDY_START, build_dataset, london_midnight
-from gb_price_sandbox.models import MODELS
+from gb_price_sandbox.models import DEFAULT_MODELS, FAMILIES, MODEL_SPECS, MODELS
 from gb_price_sandbox.optimise import PERFECT_FORESIGHT, BatterySpec, battery_backtest
 from gb_price_sandbox.timing import LONDON
 from gb_price_sandbox.viz.theme import ACTUAL, entity_colors
@@ -52,9 +57,48 @@ def load_study_data() -> pd.DataFrame:
 
 
 def model_colors(dark: bool) -> dict[str, str]:
-    """Fixed colour for every model, the realised price, and perfect foresight."""
-    names = [ACTUAL, PERFECT_FORESIGHT, *MODELS]
-    return entity_colors(names, dark, actual_names=(ACTUAL, PERFECT_FORESIGHT))
+    """Fixed colour for every model, the realised price, and perfect foresight.
+
+    Colour follows the model *family* (8 families, 8 palette slots, never cycled); models in
+    the same family are told apart by line dash (see :func:`model_dashes`) and by name.
+    """
+    family_colors = entity_colors(list(FAMILIES), dark)
+    colors = entity_colors(
+        [ACTUAL, PERFECT_FORESIGHT], dark, actual_names=(ACTUAL, PERFECT_FORESIGHT)
+    )
+    colors.update({s.name: family_colors[s.family] for s in MODEL_SPECS})
+    return colors
+
+
+_DASHES = ("solid", "dash", "dot")
+
+
+def model_dashes() -> dict[str, str]:
+    """Line dash per model: solid for a family's first model, then dashed, then dotted."""
+    seen: dict[str, int] = {}
+    out = {ACTUAL: "solid", PERFECT_FORESIGHT: "solid"}
+    for s in MODEL_SPECS:
+        k = seen.get(s.family, 0)
+        out[s.name] = _DASHES[k % len(_DASHES)]
+        seen[s.family] = k + 1
+    return out
+
+
+def cached_model_names(test_start: dt.date, test_end: dt.date) -> list[str]:
+    """Models whose backtest for this window is already on disk (so loads instantly)."""
+    data = load_study_data()
+    settings = get_settings()
+    return [
+        name
+        for name, factory in MODELS.items()
+        if backtest_cache_path(data, name, factory, test_start, test_end, settings).exists()
+    ]
+
+
+def default_model_selection(test_start: dt.date, test_end: dt.date) -> list[str]:
+    """The quick models plus any already backtested for this window, in registry order."""
+    chosen = set(DEFAULT_MODELS) | set(cached_model_names(test_start, test_end))
+    return [name for name in MODELS if name in chosen]
 
 
 def run_backtests(
@@ -127,7 +171,10 @@ def run_battery_page(
         max_cycles_per_day=cycles,
     )
     start, end = battery_window(window_label)
-    results = run_backtests(DEFAULT_TEST_START, default_test_end())
+    test_end = default_test_end()
+    # Only models that are quick or already backtested, so the page never stalls for minutes.
+    names = default_model_selection(DEFAULT_TEST_START, test_end)
+    results = run_backtests(DEFAULT_TEST_START, test_end, names)
     table, schedules = battery_results(results, battery, start, end)
     index = schedules[PERFECT_FORESIGHT].index
     forecasts = {name: res.loc[index, "q50"] for name, res in results.items()}

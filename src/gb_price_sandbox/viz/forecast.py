@@ -16,8 +16,12 @@ def fig_forecast_window(
     start_day: dt.date,
     days: int,
     dark: bool,
+    dashes: dict[str, str] | None = None,
 ) -> go.Figure:
-    """Realised price and each model's median forecast over ``days`` days from ``start_day``."""
+    """Realised price and each model's median forecast over ``days`` days from ``start_day``.
+
+    ``dashes`` (optional) tells apart models that share a family colour.
+    """
     first = next(iter(results.values()))
     end_day = start_day + dt.timedelta(days=days)
     window = (first["delivery_day"] >= start_day) & (first["delivery_day"] < end_day)
@@ -40,7 +44,7 @@ def fig_forecast_window(
                 y=res.loc[window, "q50"],
                 name=name,
                 mode="lines",
-                line={"width": 2, "color": colors[name]},
+                line={"width": 2, "color": colors[name], "dash": (dashes or {}).get(name, "solid")},
                 hovertemplate=f"{name} £%{{y:.0f}}<extra></extra>",
             )
         )
@@ -49,7 +53,12 @@ def fig_forecast_window(
     return style(fig, dark, height=400)
 
 
-def fig_error_by_time_of_day(table: pd.DataFrame, colors: dict[str, str], dark: bool) -> go.Figure:
+def fig_error_by_time_of_day(
+    table: pd.DataFrame,
+    colors: dict[str, str],
+    dark: bool,
+    dashes: dict[str, str] | None = None,
+) -> go.Figure:
     """MAE of each model's median by local half-hour of day."""
     labels = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)]
     fig = go.Figure()
@@ -60,7 +69,7 @@ def fig_error_by_time_of_day(table: pd.DataFrame, colors: dict[str, str], dark: 
                 y=table[name],
                 name=name,
                 mode="lines",
-                line={"width": 2, "color": colors[name]},
+                line={"width": 2, "color": colors[name], "dash": (dashes or {}).get(name, "solid")},
                 hovertemplate=f"{name} %{{x}}: MAE £%{{y:.1f}}<extra></extra>",
             )
         )

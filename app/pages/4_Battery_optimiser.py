@@ -64,11 +64,14 @@ day = st.select_slider(
     value=day_options[-1],
     format_func=lambda d: f"{d:%a %d %b %Y}",
 )
+available = [PERFECT_FORESIGHT, *(m for m in MODELS if m in schedules)]
 shown = st.multiselect(
-    "Schedules", [PERFECT_FORESIGHT, *MODELS], default=[PERFECT_FORESIGHT, list(MODELS)[-1]]
+    "Schedules",
+    available,
+    default=[PERFECT_FORESIGHT, best],  # best capture rate, from above
 )
 st.plotly_chart(
-    bv.fig_dispatch_day(schedules, forecasts, shown, colors, day, dark),
+    bv.fig_dispatch_day(schedules, forecasts, shown, colors, day, dark, app_data.model_dashes()),
     width="stretch",
     theme=None,
 )

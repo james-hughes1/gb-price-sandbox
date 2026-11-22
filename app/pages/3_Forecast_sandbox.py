@@ -7,6 +7,7 @@ from gb_price_sandbox.viz import forecast as fv
 st.set_page_config(page_title="Forecast sandbox", layout="wide")
 dark = st.context.theme.type == "dark"
 colors = app_data.model_colors(dark)
+dashes = app_data.model_dashes()
 
 st.title("Forecast sandbox")
 st.markdown(
@@ -32,7 +33,12 @@ test_start, test_end = c1.slider(
     value=(app_data.DEFAULT_TEST_START, test_end),
     format="MMM YYYY",
 )
-names = c2.multiselect("Models", list(MODELS), default=list(MODELS))
+names = c2.multiselect(
+    "Models",
+    list(MODELS),
+    default=app_data.default_model_selection(app_data.DEFAULT_TEST_START, test_end),
+    help="Models not yet backtested for this period can take several minutes on first run.",
+)
 if not names:
     st.info("Pick at least one model.")
     st.stop()
@@ -75,13 +81,15 @@ c1, c2 = st.columns([2, 1])
 start_day = c1.date_input("Week starting", value=default_day, min_value=days[0], max_value=days[-1])
 span = c2.select_slider("Days shown", options=[1, 3, 7, 14], value=7)
 st.plotly_chart(
-    fv.fig_forecast_window(results, colors, start_day, span, dark),
+    fv.fig_forecast_window(results, colors, start_day, span, dark, dashes),
     width="stretch",
     theme=None,
 )
 
 st.subheader("When are forecasts worst?")
-st.plotly_chart(fv.fig_error_by_time_of_day(by_slot, colors, dark), width="stretch", theme=None)
+st.plotly_chart(
+    fv.fig_error_by_time_of_day(by_slot, colors, dark, dashes), width="stretch", theme=None
+)
 st.markdown(
     """
 Errors are largest around midday, not at the evening peak. The likely reason is solar: midday
