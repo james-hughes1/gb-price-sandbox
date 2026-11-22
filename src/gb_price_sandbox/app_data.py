@@ -7,12 +7,18 @@ can wrap them in ``st.cache_data``.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 
 import pandas as pd
+import requests
 
 from gb_price_sandbox.backtest import cached_walk_forward, error_by_period_of_day, leaderboard
 from gb_price_sandbox.config import get_settings
-from gb_price_sandbox.features.dataset import STUDY_START, build_dataset
+from gb_price_sandbox.data.calendar import bank_holiday_dates, load_bank_holidays
+from gb_price_sandbox.data.open_meteo import load_weather
+from gb_price_sandbox.data.pv_live import load_solar_outturn
+from gb_price_sandbox.features import explore
+from gb_price_sandbox.features.dataset import STUDY_START, build_dataset, london_midnight
 from gb_price_sandbox.models import MODELS
 from gb_price_sandbox.optimise import PERFECT_FORESIGHT, BatterySpec, battery_backtest
 from gb_price_sandbox.timing import LONDON
@@ -127,3 +133,143 @@ def run_battery_page(
     forecasts = {name: res.loc[index, "q50"] for name, res in results.items()}
     days = sorted(set(index.tz_convert(LONDON).date))
     return table, schedules, forecasts, days
+
+
+# --- Features tab ----------------------------------------------------------------------------
+
+
+def load_feature_data() -> tuple[pd.DataFrame, list[str]]:
+    """The study dataset plus every exploration feature (see :mod:`~.features.explore`).
+
+    Weather, solar and holiday sources are optional: if one can't be reached its columns are
+    left empty rather than breaking the page.
+
+    Returns:
+        ``(frame, unavailable)``: the exploration frame and the names of sources that failed.
+    """
+    data = load_study_data()
+    settings = get_settings()
+    start, end = london_midnight(STUDY_START), london_midnight(data_end())
+    unavailable: list[str] = []
+
+    def attempt(name, load):
+        try:
+            return load()
+        except (requests.RequestException, KeyError, ValueError):
+            unavailable.append(name)
+            return None
+
+    weather = attempt("Open-Meteo weather", lambda: load_weather(start, end, settings))
+    solar = attempt("PV_Live solar", lambda: load_solar_outturn(start, end, settings))
+    holidays = attempt(
+        "GOV.UK bank holidays",
+        lambda: bank_holiday_dates(load_bank_holidays(settings, until=data_end())),
+    )
+    frame = explore.add_exploration_features(data, weather=weather, solar=solar, holidays=holidays)
+    return frame, unavailable
+
+
+def feature_selector() -> list[tuple[str, str]]:
+    """``(key, label)`` for each feature, in selector order. Labels name the group."""
+    group = {"target": "Target", "used": "Used today", "built": "Built", "candidate": "Candidate"}
+    return [(f.key, f"{group[f.status]} · {f.title}") for f in explore.ordered_catalogue()]
+
+
+def feature_filter_bounds(frame: pd.DataFrame) -> tuple[int, int]:
+    """First and last calendar year in the exploration frame."""
+    years = frame.index.tz_convert(LONDON).year
+    return int(years.min()), int(years.max())
+
+
+def filter_feature_frame(
+    frame: pd.DataFrame, years: tuple[int, int], periods: tuple[int, int]
+) -> pd.DataFrame:
+    """Rows in the year range and local half-hour range (both inclusive).
+
+    Args:
+        frame: Exploration frame.
+        years: First and last calendar year (local time).
+        periods: First and last half-hour of the day, 0 (00:00) to 47 (23:30).
+    """
+    year = frame.index.tz_convert(LONDON).year
+    keep = (year >= years[0]) & (year <= years[1])
+    keep &= frame["period_of_day"].between(periods[0], periods[1]).to_numpy()
+    return frame[keep]
+
+
+@dataclass(frozen=True)
+class FeatureView:
+    """Everything the Features tab draws for one selected feature."""
+
+    spec: explore.FeatureSpec
+    variants: list[explore.Variant]
+    daily: pd.DataFrame
+    histograms: dict[str, tuple[pd.DataFrame, float, float]]
+    relationships: dict[str, pd.DataFrame]
+    categories: dict[str, pd.DataFrame]
+    correlations: dict[str, tuple[float, float]]
+    coverage: dict[str, tuple[dt.date, dt.date]]
+    lag_profile: pd.DataFrame | None = None
+
+
+def feature_view(frame: pd.DataFrame, key: str) -> FeatureView:
+    """Summaries for feature ``key``: daily series, histograms, price relationships.
+
+    Only the variants charted on the page are summarised; those with no data at all (e.g. a
+    source that failed to load) are dropped.
+    """
+    spec = explore.CATALOGUE_BY_KEY[key]
+    variants = [v for v in spec.shown() if frame[v.column].notna().any()]
+    continuous = [v for v in variants if v.kind == "continuous"]
+    daily = (
+        explore.daily_means(frame, [v.column for v in continuous])
+        if continuous and spec.timeseries
+        else None
+    )
+    histograms, relationships, categories, correlations, coverage = {}, {}, {}, {}, {}
+    for v in variants:
+        col = frame[v.column]
+        present = frame.loc[col.notna(), "delivery_day"]
+        coverage[v.column] = (present.min(), present.max())
+        # Codes of a many-valued category (day names, months) have no meaningful order.
+        ordered = v.kind == "continuous" or len(v.categories) == 2
+        # A column that is constant in the filtered rows has no defined correlation.
+        if v.column != v.target and ordered and col.min() < col.max():
+            correlations[v.column] = (
+                float(col.corr(frame[v.target], method="spearman")),
+                float(col.corr(frame[v.target], method="pearson")),
+            )
+        if v.kind == "continuous":
+            histograms[v.column] = explore.histogram(col)
+            if v.column != v.target:
+                relationships[v.column] = explore.binned_relationship(col, frame[v.target])
+        else:
+            categories[v.column] = explore.by_category(col, frame[v.target], v.categories)
+    return FeatureView(
+        spec=spec,
+        variants=variants,
+        daily=daily if daily is not None else pd.DataFrame(),
+        histograms=histograms,
+        relationships=relationships,
+        categories=categories,
+        correlations=correlations,
+        coverage=coverage,
+        lag_profile=explore.lag_profile(frame) if spec.lag_profile else None,
+    )
+
+
+def feature_correlations(
+    frame: pd.DataFrame, method: str, include_transforms: bool
+) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
+    """Correlation matrix for the Features tab.
+
+    Returns:
+        ``(matrix, labels, label_to_feature)``: the matrix, its short labels in order, and
+        the feature key each label belongs to (for highlighting the selected feature).
+    """
+    owner = {v.column: f.key for f in explore.CATALOGUE for v in f.variants}
+    variants = explore.matrix_columns(include_transforms)
+    matrix = explore.correlation_matrix(frame, [v.column for v in variants], method)
+    short = {v.column: v.short for v in variants}
+    labels = [short[c] for c in matrix.columns]
+    return matrix, labels, {short[c]: owner[c] for c in matrix.columns}

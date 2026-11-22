@@ -16,8 +16,10 @@ perfect foresight.
 Use the sidebar to explore:
 
 1. **Background**: historical GB prices, demand, renewables and gas, and how prices are set.
-2. **Forecast sandbox**: day-ahead price models backtested walk-forward, on a leaderboard.
-3. **Battery optimiser**: perfect-foresight vs forecast-driven dispatch.
-4. **Scenarios**: illustrative gas shocks and weather-year resampling.
+2. **Features**: every model input and candidate feature, its transformations, how it
+   relates to price, and a correlation matrix.
+3. **Forecast sandbox**: day-ahead price models backtested walk-forward, on a leaderboard.
+4. **Battery optimiser**: perfect-foresight vs forecast-driven dispatch.
+5. **Scenarios**: illustrative gas shocks and weather-year resampling.
 """
 )
