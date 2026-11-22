@@ -25,7 +25,10 @@ from gb_price_sandbox.data.elexon_forecasts import load_demand_forecast, load_wi
 from gb_price_sandbox.features.vintage import cutoff_times, select_vintage
 from gb_price_sandbox.timing import LONDON, PERIOD, delivery_day
 
-PRICE_LAG_DAYS: tuple[int, ...] = (2, 3, 7)
+#: 2, 3, 7: LEAR's lags. 14, 21, 28: with 7, the last four same weekdays (weekday profile).
+PRICE_LAG_DAYS: tuple[int, ...] = (2, 3, 7, 14, 21, 28)
+#: Bump when the dataset's columns change, so cached files are rebuilt.
+DATASET_VERSION = 2
 STUDY_START = dt.date(2022, 1, 1)
 
 TARGET = "price"
@@ -113,7 +116,11 @@ def build_dataset(
     Returns:
         Half-hourly frame on a complete UTC grid, described in the module docstring.
     """
-    path = settings.data_dir / "processed" / f"dataset_{start_day}_{end_day}_h{hour:02d}.parquet"
+    path = (
+        settings.data_dir
+        / "processed"
+        / f"dataset_v{DATASET_VERSION}_{start_day}_{end_day}_h{hour:02d}.parquet"
+    )
 
     def build() -> pd.DataFrame:
         start, end = london_midnight(start_day), london_midnight(end_day)

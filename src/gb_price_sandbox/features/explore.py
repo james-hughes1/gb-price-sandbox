@@ -22,11 +22,11 @@ import numpy as np
 import pandas as pd
 
 from gb_price_sandbox.data.calendar import is_christmas_period
-from gb_price_sandbox.timing import LONDON
+from gb_price_sandbox.timing import LONDON, MID_PUBLICATION_MARGIN
 
 #: Hours between the end of the last D-1 price period used and the issue time, to allow for
 #: publication delay. With a 10:00 issue time, D-1 prices up to 09:00 are used.
-PUBLICATION_MARGIN_H = 1
+PUBLICATION_MARGIN_H = int(MID_PUBLICATION_MARGIN / pd.Timedelta(hours=1))
 #: Window (days) for the recent-volatility features, ending on D-2.
 VOLATILITY_DAYS = 7
 #: Lags (days) in the correlation-by-lag chart. One day is not allowed: most of D-1 hasn't
