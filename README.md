@@ -1,5 +1,7 @@
 # GB Power Price Sandbox
 
+![Grid-scale battery storage](grid_storage.webp)
+
 **How much battery revenue does forecast error cost, and do quantile forecasts win some of it back?**
 
 A multi-tab Streamlit app for exploring GB wholesale power prices, backtesting probabilistic
@@ -47,8 +49,45 @@ Configuration is via environment variables (prefix `GBPS_`); see `.env.example`.
 
 ```bash
 docker build -t gb-price-sandbox .
-docker run --rm -p 8501:8501 -v "$PWD/data:/app/data" gb-price-sandbox
+docker run --rm -p 8501:8501 -v "$PWD/data:/app/data" -e PRETRAIN_ON_START=1 gb-price-sandbox
 ```
+
+`PRETRAIN_ON_START=1` refreshes the Battery page's forecasts before serving (about 35 s, cached
+afterwards).
+
+### Deploy to Google Cloud
+
+Cloud Run, set up for minimum cost: the app scales to zero when idle (so the first visit after a
+quiet spell is slower), a Cloud Run Job refreshes the Battery forecasts daily at 10:15 London
+time, and both share a Cloud Storage bucket mounted at `/app/data`, so no code changes are needed.
+
+```
+Cloud Scheduler (10:15 London) ──► Cloud Run Job: pretrain ──writes──► GCS bucket
+Users ──► Cloud Run Service: Streamlit app ◄──reads── (mounted at /app/data)
+```
+
+First deploy (needs `gcloud` installed and logged in, and a project with billing):
+
+```bash
+PROJECT=my-project deploy/gcp.sh setup seed build service job schedule
+```
+
+The steps, each safe to re-run:
+
+| Step | What it does |
+|---|---|
+| `setup` | Enables APIs; creates the bucket, a runtime service account and the image repository; grants permissions |
+| `seed` | Uploads your local `data/` cache to the bucket, so nothing is re-downloaded |
+| `build` | Builds the image with Cloud Build |
+| `service` | Deploys the app (scale to zero, at most one instance) and prints its URL |
+| `job` | Deploys the daily pretrain job and runs it once |
+| `schedule` | Creates the daily trigger |
+
+Shipping new code afterwards: `PROJECT=my-project deploy/gcp.sh build service job`, or connect a
+Cloud Build trigger on pushes to `main` using `deploy/cloudbuild.yaml`. Settings (`REGION`,
+`BUCKET`, `PUBLIC`, `MAX_INSTANCES`, ...) are environment variables at the top of
+`deploy/gcp.sh`. `PUBLIC=false` keeps the app private, e.g. behind Identity-Aware Proxy; worth
+it before sharing widely, since anyone can press Train in the Forecast sandbox.
 
 ## Project layout
 
@@ -67,6 +106,7 @@ src/gb_price_sandbox/
   viz/             Plotly figures (shared theme, fixed colour per model)
   app_data.py      the functions the Streamlit pages call
 app/               Streamlit pages (UI only)
+deploy/            Google Cloud Run deployment (gcp.sh, cloudbuild.yaml)
 tests/
 ```
 
@@ -89,3 +129,11 @@ tests/
 ## Limitations
 
 _To come._
+
+## How this was built
+
+Much of the code was written with [Claude Code](https://claude.com/claude-code), Anthropic's
+coding agent, working from the brief in `CLAUDE.md`. One guardrail is enforced rather than just
+requested: Claude never commits. Deny rules in `.claude/settings.json` block `git commit`,
+`push`, `merge`, `rebase`, `cherry-pick`, `revert` and `am`, so every change is left in the
+working tree for a human (James) to review and commit.
