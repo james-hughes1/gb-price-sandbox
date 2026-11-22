@@ -9,6 +9,7 @@ evenly between charging and discharging (each leg has efficiency ``sqrt(rte)``).
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pandas as pd
@@ -161,6 +162,7 @@ def daily_dispatch(
     decision_prices: pd.Series,
     settlement_prices: pd.Series | None,
     battery: BatterySpec,
+    progress: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
     """Dispatch one GB delivery day at a time, settling each schedule at realised prices.
 
@@ -175,6 +177,7 @@ def daily_dispatch(
         settlement_prices: Realised half-hourly prices, same index. ``None`` settles at
             ``decision_prices`` (perfect foresight).
         battery: Battery parameters.
+        progress: Called as ``progress(days_done, days_total)`` after each day.
 
     Returns:
         Per-period schedule as from :func:`optimise_dispatch`, plus ``settlement_price``,
@@ -186,8 +189,11 @@ def daily_dispatch(
         raise ValueError("decision and settlement prices must share an index")
 
     days = []
-    for _, day_prices in decision_prices.groupby(delivery_day(decision_prices.index)):
+    groups = decision_prices.groupby(delivery_day(decision_prices.index))
+    for done, (_, day_prices) in enumerate(groups, start=1):
         days.append(optimise_dispatch(day_prices, battery))
+        if progress is not None:
+            progress(done, groups.ngroups)
     schedule = pd.concat(days)
     schedule["settlement_price"] = settlement_prices
     schedule["revenue"] = settle(schedule, settlement_prices)

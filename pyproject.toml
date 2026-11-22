@@ -64,6 +64,7 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
 "app/**" = ["D"]
+"src/gb_price_sandbox/models/docs.py" = ["E501"]  # LaTeX display maths reads better unbroken
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

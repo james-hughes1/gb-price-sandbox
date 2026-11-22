@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pandas as pd
 
 from gb_price_sandbox.optimise.battery import BatterySpec, capture_rate, daily_dispatch, summarise
@@ -20,7 +22,9 @@ def dispatchable_days(results: dict[str, pd.DataFrame]) -> list:
 
 
 def battery_backtest(
-    results: dict[str, pd.DataFrame], battery: BatterySpec
+    results: dict[str, pd.DataFrame],
+    battery: BatterySpec,
+    progress: Callable[[float, str], None] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Dispatch on each model's median forecast, settle at realised prices, compare to perfect.
 
@@ -30,6 +34,7 @@ def battery_backtest(
     Args:
         results: Backtest output per model (from ``walk_forward``), sharing an index.
         battery: Battery parameters.
+        progress: Called as ``progress(fraction_done, message)`` as days are solved.
 
     Returns:
         A summary table (one row per model plus perfect foresight) with ``Revenue (GBP)``,
@@ -42,9 +47,17 @@ def battery_backtest(
     keep = first["delivery_day"].isin(days)
     actual = first.loc[keep, "y"]
 
-    schedules = {PERFECT_FORESIGHT: daily_dispatch(actual, None, battery)}
-    for name, res in results.items():
-        schedules[name] = daily_dispatch(res.loc[keep, "q50"], actual, battery)
+    runs = [(PERFECT_FORESIGHT, actual, None)] + [
+        (name, res.loc[keep, "q50"], actual) for name, res in results.items()
+    ]
+    schedules = {}
+    for i, (name, decision, settlement) in enumerate(runs):
+
+        def report(done: int, total: int, i: int = i, name: str = name) -> None:
+            if progress is not None:
+                progress((i + done / total) / len(runs), f"{name}: day {done} of {total}")
+
+        schedules[name] = daily_dispatch(decision, settlement, battery, report)
 
     perfect = summarise(schedules[PERFECT_FORESIGHT], battery)["revenue"]
     rows = {}

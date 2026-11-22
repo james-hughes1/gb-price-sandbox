@@ -2,7 +2,7 @@ import streamlit as st
 
 from gb_price_sandbox import app_data
 from gb_price_sandbox.backtest import METRICS
-from gb_price_sandbox.models.docs import FAMILY_DOCS
+from gb_price_sandbox.models.docs import FAMILY_DOCS, NOTATION
 from gb_price_sandbox.viz import forecast as fv
 
 st.set_page_config(page_title="Forecast sandbox", layout="wide")
@@ -167,6 +167,7 @@ start_day = c1.date_input(
 )
 span = c2.select_slider("Days shown", options=[1, 3, 7, 14], value=7)
 
+st.markdown(NOTATION)
 families = app_data.sandbox_families(result)
 for tab, family in zip(st.tabs(families), families, strict=True):
     with tab:

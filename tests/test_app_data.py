@@ -22,8 +22,11 @@ def test_default_test_end_is_month_start(fixed_today):
         ("Whole test period", app_data.DEFAULT_TEST_START),
     ],
 )
-def test_battery_window(fixed_today, label, start):
-    assert app_data.battery_window(label) == (start, dt.date(2026, 11, 1))
+def test_battery_window(label, start):
+    from gb_price_sandbox.pretrained import Pretrained
+
+    pre = Pretrained({}, app_data.DEFAULT_TEST_START, dt.date(2026, 11, 1), "now")
+    assert app_data.battery_window(label, pre) == (start, dt.date(2026, 11, 1))
 
 
 def test_model_colors_fixed_per_entity():

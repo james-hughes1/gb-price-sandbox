@@ -34,6 +34,7 @@ from gb_price_sandbox.models import (
     build_model,
 )
 from gb_price_sandbox.optimise import PERFECT_FORESIGHT, BatterySpec, battery_backtest
+from gb_price_sandbox.pretrained import Pretrained, load_pretrained
 from gb_price_sandbox.timing import LONDON
 from gb_price_sandbox.viz.theme import ACTUAL, entity_colors
 
@@ -145,22 +146,8 @@ def forecast_scores(results: dict[str, pd.DataFrame], sort_by: str = "CRPS") -> 
     return leaderboard(results, sort_by)
 
 
-def battery_results(
-    results: dict[str, pd.DataFrame],
-    battery: BatterySpec,
-    window_start: dt.date,
-    window_end: dt.date,
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Capture-rate table and schedules for delivery days ``[window_start, window_end)``."""
-    sliced = {
-        name: res[(res["delivery_day"] >= window_start) & (res["delivery_day"] < window_end)]
-        for name, res in results.items()
-    }
-    return battery_backtest(sliced, battery)
-
-
-#: Battery-page period choices: label -> months back from the end of the test window
-#: (``None`` = the whole test window).
+#: Battery-page period choices: label -> months back from the end of the forecasts
+#: (``None`` = everything pretrained).
 BATTERY_WINDOWS: dict[str, int | None] = {
     "Last 3 months": 3,
     "Last 12 months": 12,
@@ -168,24 +155,54 @@ BATTERY_WINDOWS: dict[str, int | None] = {
 }
 
 
-def battery_window(label: str) -> tuple[dt.date, dt.date]:
+class PretrainedMissingError(RuntimeError):
+    """The Battery page's forecasts haven't been generated yet."""
+
+
+def battery_inputs() -> Pretrained:
+    """The pretrained forecasts the Battery page uses (no training happens here)."""
+    found = load_pretrained(get_settings())
+    if found is None:
+        raise PretrainedMissingError(
+            "No pretrained forecasts. Run: uv run python -m gb_price_sandbox.pretrain"
+        )
+    return found
+
+
+def battery_window(label: str, pretrained: Pretrained) -> tuple[dt.date, dt.date]:
     """Delivery-day window ``[start, end)`` for a :data:`BATTERY_WINDOWS` label."""
-    end = default_test_end()
+    end = pretrained.test_end
     months = BATTERY_WINDOWS[label]
     if months is None:
-        return DEFAULT_TEST_START, end
+        return pretrained.test_start, end
     start = (pd.Timestamp(end) - pd.DateOffset(months=months)).date()
-    return max(start, DEFAULT_TEST_START), end
+    return max(start, pretrained.test_start), end
+
+
+@dataclass(frozen=True)
+class BatteryResult:
+    """Everything the Battery page shows for one set of options."""
+
+    table: pd.DataFrame
+    schedules: dict[str, pd.DataFrame]
+    forecasts: dict[str, pd.Series]
+    days: list[dt.date]
+    battery: BatterySpec
+    window: tuple[dt.date, dt.date]
 
 
 def run_battery_page(
-    power_mw: float, duration_h: float, rte: float, cycles: float, window_label: str
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, pd.Series], list[dt.date]]:
-    """Everything the Battery page shows for one set of slider values.
+    power_mw: float,
+    duration_h: float,
+    rte: float,
+    cycles: float,
+    window_label: str,
+    progress: Callable[[float, str], None] | None = None,
+) -> BatteryResult:
+    """Optimise dispatch on the pretrained forecasts and on perfect foresight.
 
-    Returns:
-        The capture-rate table, per-period schedules, each model's median forecast aligned to
-        the schedules, and the list of delivery days available for the day-detail chart.
+    Raises:
+        PretrainedMissingError: If the pretrained forecasts haven't been generated.
     """
     battery = BatterySpec(
         power_mw=power_mw,
@@ -193,16 +210,17 @@ def run_battery_page(
         round_trip_efficiency=rte,
         max_cycles_per_day=cycles,
     )
-    start, end = battery_window(window_label)
-    test_end = default_test_end()
-    # Only models that are quick or already backtested, so the page never stalls for minutes.
-    names = default_model_selection(DEFAULT_TEST_START, test_end)
-    results = run_backtests(DEFAULT_TEST_START, test_end, names)
-    table, schedules = battery_results(results, battery, start, end)
+    pretrained = battery_inputs()
+    start, end = battery_window(window_label, pretrained)
+    sliced = {
+        name: res[(res["delivery_day"] >= start) & (res["delivery_day"] < end)]
+        for name, res in pretrained.results.items()
+    }
+    table, schedules = battery_backtest(sliced, battery, progress)
     index = schedules[PERFECT_FORESIGHT].index
-    forecasts = {name: res.loc[index, "q50"] for name, res in results.items()}
+    forecasts = {name: res.loc[index, "q50"] for name, res in sliced.items()}
     days = sorted(set(index.tz_convert(LONDON).date))
-    return table, schedules, forecasts, days
+    return BatteryResult(table, schedules, forecasts, days, battery, (start, end))
 
 
 # --- Features tab ----------------------------------------------------------------------------

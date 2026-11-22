@@ -24,4 +24,6 @@ RUN uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8501
-CMD ["streamlit", "run", "app/Home.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+# Generate (or refresh) the Battery page's pretrained forecasts, then serve. Both are cached in
+# the mounted data volume, so later starts are quick.
+CMD ["sh", "-c", "python -m gb_price_sandbox.pretrain && exec streamlit run app/Home.py --server.address=0.0.0.0 --server.port=8501 --server.headless=true"]
