@@ -19,7 +19,7 @@ from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.seasonal import MSTL
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-from gb_price_sandbox.models.base import QUANTILE_COLUMNS
+from gb_price_sandbox.models.base import QUANTILE_COLUMNS, Objective
 from gb_price_sandbox.timing import LONDON, PERIOD
 
 #: Trailing window (days) each refit and each daily update uses, unless a model overrides it.
@@ -47,6 +47,13 @@ def _empty(index: pd.Index) -> pd.DataFrame:
     return pd.DataFrame(np.nan, index=index, columns=list(QUANTILE_COLUMNS))
 
 
+def _bands(lower: np.ndarray, mean: np.ndarray, upper: np.ndarray, objective: Objective):
+    """Stack (q10, q50, q90); with the mean objective, report the mean in every column."""
+    if objective == "mean":
+        return np.column_stack([mean, mean, mean])
+    return np.column_stack([lower, mean, upper])
+
+
 class MSTLAR:
     """MSTL decomposition plus an AR(2) model for what's left.
 
@@ -62,8 +69,9 @@ class MSTLAR:
     name = "MSTL + AR"
     uses_history = True
 
-    def __init__(self) -> None:
+    def __init__(self, objective: Objective = "quantile") -> None:
         """Fixed settings: 28-day window, periods 48 and 336, AR(2) with a constant."""
+        self.objective = objective
         self.periods = (48, 336)
         self.order = (2, 0, 0)
 
@@ -102,7 +110,7 @@ class MSTLAR:
             mean = np.asarray(fc.predicted_mean)
             ci = np.asarray(fc.conf_int(alpha=_ALPHA))
         season = self._season(future.index)
-        zq = np.column_stack([ci[:, 0], mean, ci[:, 1]]) + season[:, None]
+        zq = _bands(ci[:, 0], mean, ci[:, 1], self.objective) + season[:, None]
         values = np.sinh(zq) * self.mad_ + self.median_
         return pd.DataFrame(values, index=future.index, columns=list(QUANTILE_COLUMNS))
 
@@ -124,11 +132,12 @@ class SARIMAXFourier:
     name = "SARIMAX"
     uses_history = True
 
-    def __init__(self) -> None:
+    def __init__(self, objective: Objective = "quantile") -> None:
         """Fixed settings: 14-day window, ARMA(1, 1) errors, 3 daily and 2 weekly harmonics.
 
         Kept small because estimating the parameters dominates its run time.
         """
+        self.objective = objective
         self.window_days = 14
         self.order = (1, 0, 1)
         self.daily_harmonics = 3
@@ -178,6 +187,6 @@ class SARIMAXFourier:
             fc = updated.get_forecast(len(future), exog=self._exog(future))
             mean = np.asarray(fc.predicted_mean)
             ci = np.asarray(fc.conf_int(alpha=_ALPHA))
-        zq = np.column_stack([ci[:, 0], mean, ci[:, 1]])
+        zq = _bands(ci[:, 0], mean, ci[:, 1], self.objective)
         values = np.sinh(zq) * self.mad_ + self.median_
         return pd.DataFrame(values, index=future.index, columns=list(QUANTILE_COLUMNS))

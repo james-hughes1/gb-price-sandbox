@@ -1,6 +1,6 @@
 """Walk-forward backtesting: expanding window, issued D-1 for delivery day D, weekly retrain."""
 
-from gb_price_sandbox.backtest.evaluate import common_rows, error_by_period_of_day, leaderboard
+from gb_price_sandbox.backtest.evaluate import METRICS, common_rows, leaderboard
 from gb_price_sandbox.backtest.walk_forward import (
     backtest_cache_path,
     cached_walk_forward,
@@ -10,11 +10,11 @@ from gb_price_sandbox.backtest.walk_forward import (
 )
 
 __all__ = [
+    "METRICS",
     "backtest_cache_path",
     "cached_walk_forward",
     "model_fingerprint",
     "common_rows",
-    "error_by_period_of_day",
     "leaderboard",
     "training_mask",
     "walk_forward",

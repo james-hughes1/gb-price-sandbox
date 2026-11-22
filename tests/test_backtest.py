@@ -8,7 +8,6 @@ import pytest
 from gb_price_sandbox.backtest import (
     cached_walk_forward,
     common_rows,
-    error_by_period_of_day,
     leaderboard,
     model_fingerprint,
     training_mask,
@@ -173,12 +172,12 @@ def test_leaderboard_uses_common_rows():
     assert (leaderboard(res)["Periods"] == 86).all()
 
 
-def test_error_by_period_of_day():
+def test_leaderboard_sorts_by_chosen_metric_and_has_rmse():
     res = _results()
-    slot = pd.Series(np.arange(96) % 48, index=res["Good"].index)
-    table = error_by_period_of_day(res, slot)
-    assert table.shape == (48, 2)
-    assert np.allclose(table["Bad"], 10.0)
+    board = leaderboard(res, sort_by="RMSE")
+    assert list(board.index) == sorted(board.index, key=lambda n: board.loc[n, "RMSE"])
+    assert (board["RMSE"] >= board["MAE"] - 1e-9).all()
+    assert np.allclose(board["Coverage error"], (board["Coverage 80%"] - 0.8).abs())
 
 
 def test_battery_backtest_perfect_is_upper_bound():

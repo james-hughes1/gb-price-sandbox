@@ -6,7 +6,7 @@ import datetime as dt
 import hashlib
 import inspect
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import pandas as pd
 
@@ -78,6 +78,8 @@ def walk_forward(
     retrain_every_days: int = 7,
     max_train_days: int | None = None,
     hour: int = 10,
+    features: Sequence[str] = FEATURE_COLUMNS,
+    progress: Callable[[int, int], None] | None = None,
 ) -> pd.DataFrame:
     """Backtest a model over delivery days ``[test_start, test_end)``.
 
@@ -94,13 +96,15 @@ def walk_forward(
         test_end: Last delivery day forecast (exclusive).
         retrain_every_days: Retrain cadence in days.
         max_train_days: Train on only the last this-many days (default: all history).
+        features: Columns the model may see (default: the core feature set).
+        progress: Called as ``progress(refits_done, refits_total)`` after each refit.
         hour: Forecast issue hour, London time on D-1, used for the leakage assertion.
 
     Returns:
         Frame indexed like ``data`` (test period only) with ``QUANTILE_COLUMNS``, the realised
         ``y``, the ``delivery_day`` and the ``trained_through`` day used for each forecast.
     """
-    features = list(FEATURE_COLUMNS)
+    features = list(features)
     in_test = (data["delivery_day"] >= test_start) & (data["delivery_day"] < test_end)
     test_days = sorted(data.loc[in_test, "delivery_day"].unique())
     blocks = [
@@ -108,7 +112,7 @@ def walk_forward(
     ]
 
     outputs = []
-    for block in blocks:
+    for done, block in enumerate(blocks, start=1):
         first = block[0]
         train = data[training_mask(data, first, max_train_days)]
         if train.empty:
@@ -127,6 +131,8 @@ def walk_forward(
         pred["delivery_day"] = rows["delivery_day"]
         pred["trained_through"] = first - dt.timedelta(days=2)
         outputs.append(pred)
+        if progress is not None:
+            progress(done, len(blocks))
     return pd.concat(outputs)
 
 
@@ -172,10 +178,16 @@ def backtest_cache_path(
     hour: int = 10,
     retrain_every_days: int = 7,
     max_train_days: int | None = None,
+    features: Sequence[str] = FEATURE_COLUMNS,
 ):
-    """Where :func:`cached_walk_forward` stores (or would store) this backtest."""
+    """Where :func:`cached_walk_forward` stores (or would store) this backtest.
+
+    The data hash covers only the columns the model can see (plus the target), so unrelated
+    columns in the frame don't invalidate the cache.
+    """
     slug = "".join(c if c.isalnum() else "_" for c in name.lower())
-    visible = data[data["delivery_day"] < test_end]
+    columns = [*features, TARGET, "delivery_day"]
+    visible = data.loc[data["delivery_day"] < test_end, columns]
     data_hash = hashlib.sha1(pd.util.hash_pandas_object(visible).to_numpy().tobytes()).hexdigest()
     key = (
         f"{slug}_{model_fingerprint(make_model)}_{test_start}_{test_end}_h{hour:02d}"
@@ -195,6 +207,8 @@ def cached_walk_forward(
     hour: int = 10,
     retrain_every_days: int = 7,
     max_train_days: int | None = None,
+    features: Sequence[str] = FEATURE_COLUMNS,
+    progress: Callable[[int, int], None] | None = None,
     refresh: bool = False,
 ) -> pd.DataFrame:
     """:func:`walk_forward`, cached as parquet under ``data/processed/backtests``.
@@ -213,6 +227,7 @@ def cached_walk_forward(
         hour=hour,
         retrain_every_days=retrain_every_days,
         max_train_days=max_train_days,
+        features=features,
     )
     out = cached_parquet(
         path,
@@ -224,6 +239,8 @@ def cached_walk_forward(
             hour=hour,
             retrain_every_days=retrain_every_days,
             max_train_days=max_train_days,
+            features=features,
+            progress=progress,
         ),
         refresh=refresh,
     )

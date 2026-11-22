@@ -10,7 +10,14 @@ import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tools.sm_exceptions import ConvergenceWarning, IterationLimitWarning
 
-from gb_price_sandbox.models.base import QUANTILE_COLUMNS, QUANTILES, sort_quantiles
+from gb_price_sandbox.features.sets import CORE, FeatureSet
+from gb_price_sandbox.models.base import (
+    QUANTILE_COLUMNS,
+    QUANTILES,
+    Objective,
+    point_as_quantiles,
+    sort_quantiles,
+)
 from gb_price_sandbox.models.baselines import LEAR, WEEKDAY_LAGS, AsinhDesign
 from gb_price_sandbox.timing import delivery_day
 
@@ -22,6 +29,25 @@ def _quantreg(y: np.ndarray, X: np.ndarray, q: float) -> np.ndarray:  # noqa: N8
         warnings.simplefilter("ignore", ConvergenceWarning)
         warnings.simplefilter("ignore", RuntimeWarning)
         return sm.QuantReg(y, X).fit(q=q, max_iter=2000).params
+
+
+def _ols(y: np.ndarray, X: np.ndarray) -> np.ndarray:  # noqa: N803
+    """Least-squares coefficients (``X`` includes the intercept column)."""
+    return np.linalg.lstsq(X, y, rcond=None)[0]
+
+
+def _fit_columns(y: np.ndarray, X: np.ndarray, objective: Objective) -> np.ndarray:  # noqa: N803
+    """Coefficients, one column per quantile (or a single column for the mean)."""
+    if objective == "mean":
+        return _ols(y, X)[:, None]
+    return np.column_stack([_quantreg(y, X, q) for q in QUANTILES])
+
+
+def _as_quantiles(values: np.ndarray, index: pd.Index) -> pd.DataFrame:
+    """Turn a (n, 3) quantile array or (n, 1) mean array into a sorted quantile frame."""
+    if values.shape[1] == 1:
+        return point_as_quantiles(pd.Series(values[:, 0], index=index))
+    return sort_quantiles(pd.DataFrame(values, index=index, columns=list(QUANTILE_COLUMNS)))
 
 
 def _with_intercept(matrix: np.ndarray) -> np.ndarray:
@@ -36,13 +62,16 @@ class LinearQuantileRegression:
     q = 0.1, 0.5 and 0.9 gives a median forecast and an 80% band. Inputs and target are on
     LEAR's asinh scale; because quantiles survive monotone transforms, transforming the fitted
     quantiles back gives quantiles of the price. No penalty is applied (unlike LEAR's LASSO).
+    With the ``mean`` objective it fits ordinary least squares instead: a point forecast.
     """
 
     name = "Linear quantile regression"
 
-    def __init__(self) -> None:
-        """LEAR's default inputs."""
-        self.design = AsinhDesign()
+    def __init__(self, features: FeatureSet = CORE, objective: Objective = "quantile") -> None:
+        """LEAR's inputs plus any extra groups; quantile or mean objective."""
+        self.features = features
+        self.objective = objective
+        self.design = AsinhDesign.for_features(features)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> LinearQuantileRegression:  # noqa: N803
         """Fit 48 x 3 quantile regressions on rows with complete inputs."""
@@ -55,25 +84,24 @@ class LinearQuantileRegression:
         self.coefs_: dict[int, np.ndarray] = {}
         for p in np.unique(periods):
             rows = periods == p
-            self.coefs_[int(p)] = np.column_stack(
-                [_quantreg(target[rows], matrix[rows], q) for q in QUANTILES]
-            )
+            self.coefs_[int(p)] = _fit_columns(target[rows], matrix[rows], self.objective)
         return self
 
     def predict_quantiles(self, X: pd.DataFrame) -> pd.DataFrame:  # noqa: N803
         """Quantile forecasts in £/MWh; NaN where inputs are missing."""
-        out = pd.DataFrame(np.nan, index=X.index, columns=list(QUANTILE_COLUMNS))
+        width = 1 if self.objective == "mean" else len(QUANTILES)
+        values = np.full((len(X), width), np.nan)
         ok = self.design.complete(X).to_numpy()
         if ok.any():
             matrix = _with_intercept(self.design.matrix(X[ok]))
             periods = X.loc[ok, "period_of_day"].to_numpy()
-            z = np.full((len(matrix), len(QUANTILES)), np.nan)
+            z = np.full((len(matrix), width), np.nan)
             for p in np.unique(periods):
                 rows = periods == p
                 if int(p) in self.coefs_:
                     z[rows] = matrix[rows] @ self.coefs_[int(p)]
-            out.loc[ok] = self.design.from_z(z)
-        return sort_quantiles(out)
+            values[ok] = self.design.from_z(z)
+        return _as_quantiles(values, X.index)
 
 
 #: Days at the end of each training window held out to calibrate QRA.
@@ -99,9 +127,16 @@ class QRA:
     :data:`QRA_REFIT_DAYS` days on data up to two days before each block (as in the main
     backtest) and forecasts it. The quantile regression is fitted on those forecasts, and LEAR
     is then refitted on the whole window to produce the inputs for the days being forecast.
+    With the ``mean`` objective the combination is fitted by least squares instead (classic
+    forecast averaging), giving a point forecast.
     """
 
     name = "QRA"
+
+    def __init__(self, features: FeatureSet = CORE, objective: Objective = "quantile") -> None:
+        """Feature set for the inner LEAR; quantile or mean combination."""
+        self.features = features
+        self.objective = objective
 
     def _inputs(self, lear: LEAR, X: pd.DataFrame) -> np.ndarray:  # noqa: N803
         weekday = X[list(WEEKDAY_LAGS)].mean(axis=1, skipna=True)
@@ -123,7 +158,7 @@ class QRA:
             block_end = block_start + dt.timedelta(days=QRA_REFIT_DAYS)
             train = days <= block_start - dt.timedelta(days=2)
             rows = (days >= block_start) & (days < block_end)
-            lear = LEAR().fit(X[train], y[train])
+            lear = LEAR(self.features).fit(X[train], y[train])
             inputs[rows] = self._inputs(lear, X[rows])
             block_start = block_end
         return inputs
@@ -143,14 +178,12 @@ class QRA:
         target = y[cal].to_numpy(dtype=float)
         ok = ~np.isnan(inputs).any(axis=1) & ~np.isnan(target)
         matrix = _with_intercept(inputs[ok])
-        self.coefs_ = np.column_stack([_quantreg(target[ok], matrix, q) for q in QUANTILES])
+        self.coefs_ = _fit_columns(target[ok], matrix, self.objective)
         self.calibration_start_ = cal_start
-        self.lear_ = LEAR().fit(X, y)
+        self.lear_ = LEAR(self.features).fit(X, y)
         return self
 
     def predict_quantiles(self, X: pd.DataFrame) -> pd.DataFrame:  # noqa: N803
         """Quantile forecasts in £/MWh; NaN where any input forecast is missing."""
         inputs = self._inputs(self.lear_, X)
-        values = _with_intercept(inputs) @ self.coefs_
-        out = pd.DataFrame(values, index=X.index, columns=list(QUANTILE_COLUMNS))
-        return sort_quantiles(out)
+        return _as_quantiles(_with_intercept(inputs) @ self.coefs_, X.index)

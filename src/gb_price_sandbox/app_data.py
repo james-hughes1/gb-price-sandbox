@@ -7,6 +7,7 @@ can wrap them in ``st.cache_data``.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pandas as pd
@@ -15,7 +16,6 @@ import requests
 from gb_price_sandbox.backtest import (
     backtest_cache_path,
     cached_walk_forward,
-    error_by_period_of_day,
     leaderboard,
 )
 from gb_price_sandbox.config import get_settings
@@ -24,12 +24,14 @@ from gb_price_sandbox.data.open_meteo import load_weather
 from gb_price_sandbox.data.pv_live import load_solar_outturn
 from gb_price_sandbox.features import explore
 from gb_price_sandbox.features.dataset import STUDY_START, build_dataset, london_midnight
+from gb_price_sandbox.features.sets import CORE, FEATURE_GROUPS, FeatureSet
 from gb_price_sandbox.models import (
     DEFAULT_MODELS,
     FAMILIES,
     MODEL_SPECS,
     MODEL_SPECS_BY_NAME,
     MODELS,
+    build_model,
 )
 from gb_price_sandbox.optimise import PERFECT_FORESIGHT, BatterySpec, battery_backtest
 from gb_price_sandbox.timing import LONDON
@@ -138,12 +140,9 @@ def run_backtests(
     }
 
 
-def forecast_scores(
-    results: dict[str, pd.DataFrame],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Leaderboard and MAE by time of day for a set of backtest results."""
-    data = load_study_data()
-    return leaderboard(results), error_by_period_of_day(results, data["period_of_day"])
+def forecast_scores(results: dict[str, pd.DataFrame], sort_by: str = "CRPS") -> pd.DataFrame:
+    """Leaderboard for a set of backtest results, best first by ``sort_by``."""
+    return leaderboard(results, sort_by)
 
 
 def battery_results(
@@ -344,3 +343,180 @@ def feature_correlations(
     short = {v.column: v.short for v in variants}
     labels = [short[c] for c in matrix.columns]
     return matrix, labels, {short[c]: owner[c] for c in matrix.columns}
+
+
+# --- Forecast sandbox ------------------------------------------------------------------------
+
+#: Training-window choices: label -> trailing days (``"default"`` keeps each model's own).
+WINDOW_OPTIONS: dict[str, int | None | str] = {
+    "Model default": "default",
+    "Expanding (all history)": None,
+    "Rolling 1 year": 365,
+    "Rolling 2 years": 730,
+}
+#: Holdout choices: label -> months before the end of the test window (None: since 2023).
+HOLDOUT_OPTIONS: dict[str, int | None] = {
+    "Last 3 months": 3,
+    "Last 6 months": 6,
+    "Last 12 months": 12,
+    "Since Jan 2023": None,
+}
+#: Refit choices: label -> days (``"default"`` keeps each model's own interval).
+REFIT_OPTIONS: dict[str, int | str] = {
+    "Model default": "default",
+    "Weekly": 7,
+}
+OBJECTIVE_OPTIONS: dict[str, str] = {
+    "Quantiles (median + 80% band)": "quantile",
+    "Mean (point forecast)": "mean",
+}
+
+
+@dataclass(frozen=True)
+class SandboxConfig:
+    """Everything the Train button runs: models, features, regime, objective, scoring."""
+
+    models: tuple[str, ...]
+    feature_groups: tuple[str, ...] = ()
+    window: str = "Model default"
+    holdout: str = "Last 12 months"
+    refit: str = "Model default"
+    objective: str = "Quantiles (median + 80% band)"
+    sort_by: str = "CRPS"
+
+    @property
+    def features(self) -> FeatureSet:
+        """The feature set handed to the models."""
+        return FeatureSet(self.feature_groups)
+
+    @property
+    def objective_key(self) -> str:
+        """``"quantile"`` or ``"mean"``."""
+        return OBJECTIVE_OPTIONS[self.objective]
+
+    def test_window(self) -> tuple[dt.date, dt.date]:
+        """Holdout delivery days ``[start, end)``."""
+        end = default_test_end()
+        months = HOLDOUT_OPTIONS[self.holdout]
+        if months is None:
+            return DEFAULT_TEST_START, end
+        start = (pd.Timestamp(end) - pd.DateOffset(months=months)).date()
+        return max(start, DEFAULT_TEST_START), end
+
+    def regime(self, name: str) -> tuple[int, int | None]:
+        """``(refit every N days, trailing window days or None)`` for model ``name``."""
+        spec = MODEL_SPECS_BY_NAME[name]
+        refit = REFIT_OPTIONS[self.refit]
+        window = WINDOW_OPTIONS[self.window]
+        return (
+            spec.retrain_every_days if refit == "default" else int(refit),
+            spec.max_train_days if window == "default" else window,
+        )
+
+
+@dataclass(frozen=True)
+class SandboxResult:
+    """What a Train run produced."""
+
+    config: SandboxConfig
+    results: dict[str, pd.DataFrame]
+    board: pd.DataFrame
+    test_start: dt.date
+    test_end: dt.date
+
+
+def run_sandbox(
+    config: SandboxConfig,
+    data: pd.DataFrame,
+    progress: Callable[[float, str], None] | None = None,
+) -> SandboxResult:
+    """Backtest every chosen model under ``config`` (cached per model and configuration).
+
+    Args:
+        config: The sandbox options.
+        data: The exploration frame (:func:`load_feature_data`), which has every feature group.
+        progress: Called as ``progress(fraction_done, message)`` as refits complete.
+    """
+    test_start, test_end = config.test_window()
+    settings = get_settings()
+    features = config.features
+    names = [n for n in MODELS if n in config.models]
+    results = {}
+    for i, name in enumerate(names):
+        retrain, window = config.regime(name)
+
+        def report(done: int, total: int, i: int = i, name: str = name) -> None:
+            if progress is not None:
+                progress((i + done / total) / len(names), f"{name}: refit {done} of {total}")
+
+        if progress is not None:
+            progress(i / len(names), f"{name}: starting")
+        uses_features = "features" in MODEL_SPECS_BY_NAME[name].options
+        results[name] = cached_walk_forward(
+            data,
+            name,
+            lambda name=name: build_model(name, features, config.objective_key),
+            test_start,
+            test_end,
+            settings,
+            retrain_every_days=retrain,
+            max_train_days=window,
+            features=features.columns if uses_features else CORE.columns,
+            progress=report,
+        )
+    if progress is not None:
+        progress(1.0, "Done")
+    board = leaderboard(results, config.sort_by) if results else pd.DataFrame()
+    return SandboxResult(config, results, board, test_start, test_end)
+
+
+def feature_group_options() -> list[tuple[str, str, str]]:
+    """``(key, label, description)`` of each optional feature group."""
+    return [(g.key, g.label, g.description) for g in FEATURE_GROUPS]
+
+
+def model_options() -> list[tuple[str, str, str, frozenset[str]]]:
+    """``(name, family, summary, options it responds to)`` for every model."""
+    return [(s.name, s.family, s.summary, s.options) for s in MODEL_SPECS]
+
+
+def sandbox_families(result: SandboxResult) -> list[str]:
+    """Families with at least one trained model, in display order."""
+    present = {MODEL_SPECS_BY_NAME[n].family for n in result.results}
+    return [f for f in FAMILIES if f in present]
+
+
+def family_models(result: SandboxResult, family: str) -> list[str]:
+    """Trained models in ``family``, in registry order."""
+    return [n for n in result.results if MODEL_SPECS_BY_NAME[n].family == family]
+
+
+def model_settings(name: str, config: SandboxConfig) -> list[tuple[str, str]]:
+    """Human-readable settings a model ran with, for the family tab."""
+    spec = MODEL_SPECS_BY_NAME[name]
+    if spec.family == "Naive baselines":
+        return [("Fitting", "none: a fixed rule"), ("Features, objective", "fixed (options n/a)")]
+    model = build_model(name, config.features, config.objective_key)
+    retrain, window = config.regime(name)
+    rows = [
+        ("Refit every", f"{retrain} days"),
+        ("Training window", "all history" if window is None else f"last {window} days"),
+    ]
+    if spec.family in ("MSTL", "SARIMAX"):
+        rows[1] = ("Training window", f"own {getattr(model, 'window_days', 28)}-day window")
+    rows.append(
+        (
+            "Features",
+            config.features.label if "features" in spec.options else "fixed (option n/a)",
+        )
+    )
+    if "objective" in spec.options:
+        rows.append(("Objective", config.objective))
+    else:
+        rows.append(("Objective", "point forecast (option n/a)" if not spec.probabilistic else ""))
+    for key, value in sorted(getattr(model, "params", {}).items()):
+        rows.append((key, str(value)))
+    for attr in ("order", "periods", "daily_harmonics", "weekly_harmonics"):
+        if hasattr(model, attr):
+            rows.append((attr, str(getattr(model, attr))))
+    return [(k, v) for k, v in rows if v]

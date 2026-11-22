@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 import pandas as pd
 
 QUANTILES: tuple[float, ...] = (0.1, 0.5, 0.9)
+
+#: What a model is trained to predict: three quantiles (a median and an 80% band) or the
+#: conditional mean (a point forecast, reported in every quantile column).
+Objective = Literal["quantile", "mean"]
 
 
 def quantile_column(q: float) -> str:

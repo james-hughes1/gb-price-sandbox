@@ -7,11 +7,13 @@ family can offer more than one fixed configuration, e.g. LightGBM light and heav
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from gb_price_sandbox.features.sets import CORE, FeatureSet
 from gb_price_sandbox.models.base import (
     QUANTILE_COLUMNS,
     QUANTILES,
     Forecaster,
     HistoryForecaster,
+    Objective,
     point_as_quantiles,
     quantile_column,
     sort_quantiles,
@@ -36,6 +38,8 @@ class ModelSpec:
             models refit every 4 weeks so a full backtest takes minutes, not hours.
         max_train_days: Trailing training window in days (None: all history). Used by the
             slowest models, again for speed.
+        options: Which sandbox options the model responds to: ``"features"`` (it can use
+            extra feature groups) and/or ``"objective"`` (it can fit quantiles or the mean).
     """
 
     name: str
@@ -45,6 +49,7 @@ class ModelSpec:
     summary: str
     retrain_every_days: int = 7
     max_train_days: int | None = None
+    options: frozenset[str] = frozenset()
 
 
 #: Refit interval for the slowest models.
@@ -121,6 +126,19 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
     ),
 )
 
+_OPTIONS: dict[str, frozenset[str]] = {
+    LEAR.name: frozenset({"features"}),
+    MSTLAR.name: frozenset({"objective"}),
+    SARIMAXFourier.name: frozenset({"objective"}),
+    LinearQuantileRegression.name: frozenset({"features", "objective"}),
+    QRA.name: frozenset({"features", "objective"}),
+    LightGBMQuantile.name: frozenset({"features", "objective"}),
+    QuantileForest.name: frozenset({"features", "objective"}),
+}
+MODEL_SPECS = tuple(
+    ModelSpec(**{**vars(s), "options": _OPTIONS.get(s.name, frozenset())}) for s in MODEL_SPECS
+)
+
 #: Model registry: display name -> zero-argument factory. Order sets the display order.
 MODELS: dict[str, Callable[[], Forecaster | HistoryForecaster]] = {
     s.name: s.factory for s in MODEL_SPECS
@@ -135,6 +153,20 @@ DEFAULT_MODELS: tuple[str, ...] = (
     WeekdayProfile.name,
     LEAR.name,
 )
+
+
+def build_model(
+    name: str, features: FeatureSet = CORE, objective: Objective = "quantile"
+) -> Forecaster | HistoryForecaster:
+    """An unfitted model, configured with the options it supports (others are ignored)."""
+    spec = MODEL_SPECS_BY_NAME[name]
+    kwargs: dict[str, object] = {}
+    if "features" in spec.options:
+        kwargs["features"] = features
+    if "objective" in spec.options:
+        kwargs["objective"] = objective
+    return spec.factory(**kwargs)
+
 
 __all__ = [
     "DEFAULT_MODELS",
@@ -156,6 +188,7 @@ __all__ = [
     "QuantileForest",
     "SARIMAXFourier",
     "SeasonalNaive",
+    "build_model",
     "WeekdayProfile",
     "point_as_quantiles",
     "quantile_column",

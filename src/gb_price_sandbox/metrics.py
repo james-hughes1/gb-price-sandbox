@@ -15,6 +15,11 @@ def mae(y_true: ArrayLike, y_pred: ArrayLike) -> float:
     return float(np.mean(np.abs(np.asarray(y_true) - np.asarray(y_pred))))
 
 
+def rmse(y_true: ArrayLike, y_pred: ArrayLike) -> float:
+    """Root mean squared error: like MAE but punishes large misses (price spikes) much more."""
+    return float(np.sqrt(np.mean((np.asarray(y_true) - np.asarray(y_pred)) ** 2)))
+
+
 def pinball_loss(y_true: ArrayLike, y_pred: ArrayLike, q: float) -> float:
     """Mean pinball (quantile) loss at quantile level ``q``.
 

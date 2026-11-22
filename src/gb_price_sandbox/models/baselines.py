@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LassoLarsIC
 
+from gb_price_sandbox.features.sets import CORE, FeatureSet
 from gb_price_sandbox.models.base import point_as_quantiles
 
 
@@ -82,6 +83,9 @@ class AsinhDesign:
       from the training target. Tames spikes and copes with negative prices.
     - Exogenous forecasts -> standardised with training mean and standard deviation.
     - Day of week -> six 0/1 dummies (Monday is the baseline).
+
+    Extra feature groups (see :mod:`gb_price_sandbox.features.sets`) join the price inputs
+    if they are in £/MWh and the standardised inputs otherwise.
     """
 
     def __init__(
@@ -92,6 +96,13 @@ class AsinhDesign:
         """Configure the input columns."""
         self.price_features = price_features
         self.exog_features = exog_features
+
+    @classmethod
+    def for_features(cls, features: FeatureSet) -> AsinhDesign:
+        """LEAR's inputs plus the extra columns of ``features``."""
+        price_extra = features.extra_price_like
+        other_extra = tuple(c for c in features.extra if c not in price_extra)
+        return cls((*PRICE_FEATURES, *price_extra), (*EXOG_FEATURES, *other_extra))
 
     @property
     def columns(self) -> list[str]:
@@ -104,7 +115,10 @@ class AsinhDesign:
         self.mad_ = float(np.median(np.abs(y - self.median_))) or 1.0
         exog = X[list(self.exog_features)].to_numpy(dtype=float)
         self.exog_mean_ = exog.mean(axis=0)
-        self.exog_std_ = exog.std(axis=0) + 1e-9
+        std = exog.std(axis=0)
+        # A column constant in training (e.g. no holidays yet) gets scale 1, not ~0, so a
+        # later non-zero value can't explode.
+        self.exog_std_ = np.where(std < 1e-6, 1.0, std)
         return self
 
     def to_z(self, prices: pd.DataFrame | pd.Series | np.ndarray) -> np.ndarray:
@@ -147,13 +161,10 @@ class LEAR:
 
     name = "LEAR"
 
-    def __init__(
-        self,
-        price_features: tuple[str, ...] = PRICE_FEATURES,
-        exog_features: tuple[str, ...] = EXOG_FEATURES,
-    ):
-        """Configure the input columns."""
-        self.design = AsinhDesign(price_features, exog_features)
+    def __init__(self, features: FeatureSet = CORE):
+        """LEAR's inputs plus any extra feature groups."""
+        self.features = features
+        self.design = AsinhDesign.for_features(features)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> LEAR:  # noqa: N803
         """Fit one LASSO per period of day on rows with complete inputs."""
