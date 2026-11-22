@@ -1,0 +1,34 @@
+# Build, push and roll out on every push to main (via a Cloud Build trigger on the repo).
+# Updates only the image; every other setting stays as deploy/gcp.sh set it.
+# Manual run:  gcloud builds submit --config deploy/cloudbuild.yaml .
+substitutions:
+  _REGION: europe-west2
+  _REPO: apps
+  _SERVICE: gb-price-sandbox
+  _JOB: gbps-pretrain
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/gb-price-sandbox:latest", "."]
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/gb-price-sandbox:latest"]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/gb-price-sandbox:latest
+      - --region=${_REGION}
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_JOB}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/gb-price-sandbox:latest
+      - --region=${_REGION}
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/gb-price-sandbox:latest

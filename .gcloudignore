@@ -1,0 +1,14 @@
+# Files Cloud Build should not upload. gitignore syntax: a leading "/" anchors a pattern to the
+# repo root (without it, "data" would also drop the src/gb_price_sandbox/data package).
+/.git
+/.github
+/.venv
+/.claude
+/.env
+/data
+/tests
+**/__pycache__
+/.pytest_cache
+/.ruff_cache
+/.coverage
+/htmlcov
