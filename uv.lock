@@ -224,6 +224,7 @@ dependencies = [
     { name = "plotly" },
     { name = "pulp" },
     { name = "pyarrow" },
+    { name = "quantile-forest" },
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "statsmodels" },
@@ -248,6 +249,7 @@ requires-dist = [
     { name = "plotly", specifier = ">=5.20" },
     { name = "pulp", specifier = ">=4.2" },
     { name = "pyarrow", specifier = ">=15" },
+    { name = "quantile-forest", specifier = ">=1.5.0" },
     { name = "requests", specifier = ">=2.31" },
     { name = "scikit-learn", specifier = ">=1.4" },
     { name = "statsmodels", specifier = ">=0.14" },
@@ -793,6 +795,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/93/7baea19427dcfbe1e5a372d81473250b379f04b1bd3c4c5ff825e2327202/pyyaml-6.0.3-cp312-cp312-win32.whl", hash = "sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5", size = 137658, upload-time = "2025-09-25T21:32:20.209Z" },
     { url = "https://files.pythonhosted.org/packages/86/bf/899e81e4cce32febab4fb42bb97dcdf66bc135272882d1987881a4b519e9/pyyaml-6.0.3-cp312-cp312-win_amd64.whl", hash = "sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b", size = 154003, upload-time = "2025-09-25T21:32:21.167Z" },
     { url = "https://files.pythonhosted.org/packages/1a/08/67bd04656199bbb51dbed1439b7f27601dfb576fb864099c7ef0c3e55531/pyyaml-6.0.3-cp312-cp312-win_arm64.whl", hash = "sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd", size = 140344, upload-time = "2025-09-25T21:32:22.617Z" },
+]
+
+[[package]]
+name = "quantile-forest"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/bc/0411a9ceed9332a0bd077fc0dc53838ef1e1108bdbb2b35e2130561acafd/quantile_forest-1.5.0.tar.gz", hash = "sha256:aa1ad80815490a740e7dd36a648e741d87d07492cf0643189302d9d260824ebb", size = 524614, upload-time = "2026-11-07T02:14:56.061Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/e6/efae5276f37a6a43c9a852880c740eac393e92805310be84bf79a6f52734/quantile_forest-1.5.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:3386e01378c210af0bdaeb48ea443dfe4aac53a49c90098de24cd6fd175ab4db", size = 850891, upload-time = "2026-11-07T02:14:22.371Z" },
+    { url = "https://files.pythonhosted.org/packages/89/fb/eb813dc5680d6606a386821ac350876a6f497f52f93a7dd9d79a4d930496/quantile_forest-1.5.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:5b6214ee1a3b4fad9c49ba45570daa54a90c9dff90d0c52b691203f12b52ab24", size = 647817, upload-time = "2026-11-07T02:14:23.817Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/39/4330ec88d95b115822b1c6e5bd0f52aa6c02b998e068262fa7379debb863/quantile_forest-1.5.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:ae106f7c953e7d35830ae1872027ad01f6442c81c51bbee533859ef7f976bc8e", size = 641973, upload-time = "2026-11-07T02:14:25.057Z" },
+    { url = "https://files.pythonhosted.org/packages/01/94/a336f49eb6ef1c0123a03f7da3811b8fbd7f59a8eabefd9cec237ed3358c/quantile_forest-1.5.0-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8b2b4d832b76dbf70091dcce66de655d3fe0432ab75f27f53109dd12e8935092", size = 1988325, upload-time = "2026-11-07T02:14:26.283Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/8b/e8bd4cc15e3c074cdf6c0ef7849174f7725ad871617e5fa6a4bc70712a9a/quantile_forest-1.5.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5c21ead974e1d85f69c2be0d66158b72ed25c9a81a95184e26754ba35f8beda3", size = 2044284, upload-time = "2026-11-07T02:14:27.58Z" },
+    { url = "https://files.pythonhosted.org/packages/26/a5/7d239634359405b7c5a19865f04cc0a3f41c5ac6dbdfb510950a82bc860a/quantile_forest-1.5.0-cp312-cp312-win_amd64.whl", hash = "sha256:3791bcefb42723c0476c63d8f59bc1ee1036426cc9d24bffeeecc296a8229f36", size = 812660, upload-time = "2026-11-07T02:14:28.879Z" },
 ]
 
 [[package]]
